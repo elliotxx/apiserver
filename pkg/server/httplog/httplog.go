@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"time"
 
+	auditinternal "k8s.io/apiserver/pkg/apis/audit"
 	"k8s.io/klog/v2"
 )
 
@@ -86,7 +87,13 @@ func WithLogging(handler http.Handler, pred StacktracePred) http.Handler {
 		req = req.WithContext(context.WithValue(ctx, respLoggerContextKey, rl))
 
 		if klog.V(3).Enabled() {
-			defer func() { klog.InfoS("HTTP", rl.LogArgs()...) }()
+			defer func() {
+				// Get audit ID from response header
+				auditID := w.Header().Get(auditinternal.HeaderAuditID)
+				kvs := []interface{}{"auditID", auditID}
+				kvs = append(kvs, rl.LogArgs()...)
+				klog.InfoS("HTTP", kvs...)
+			}()
 		}
 		handler.ServeHTTP(rl, req)
 	})
