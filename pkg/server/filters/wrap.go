@@ -19,6 +19,7 @@ package filters
 import (
 	"fmt"
 	"net/http"
+	standruntime "runtime"
 
 	"k8s.io/apimachinery/pkg/util/runtime"
 	auditinternal "k8s.io/apiserver/pkg/apis/audit"
@@ -34,7 +35,11 @@ func WithPanicRecovery(handler http.Handler, resolver request.RequestInfoResolve
 		// Get audit ID from response header
 		auditID := w.Header().Get(auditinternal.HeaderAuditID)
 
+		klog.Errorf("As soon as the panic occurs, immediately output the error stack, method: %v, URI: %v, auditID: %v, current error: %v, error stack: %v", req.Method, req.RequestURI, auditID, err, currentStack())
+
 		if err == http.ErrAbortHandler {
+			klog.Errorf("Encountered an http.ErrAbortHandler error, method: %v, URI: %v, auditID: %v, current error: %v", req.Method, req.RequestURI, auditID, err)
+
 			// Honor the http.ErrAbortHandler sentinel panic value
 			//
 			// If ServeHTTP panics, the server (the caller of ServeHTTP) assumes
@@ -56,7 +61,7 @@ func WithPanicRecovery(handler http.Handler, resolver request.RequestInfoResolve
 			// This call can have different handlers, but the default chain rate limits. Call it after the metrics are updated
 			// in case the rate limit delays it.  If you outrun the rate for this one timed out requests, something has gone
 			// seriously wrong with your server, but generally having a logging signal for timeouts is useful.
-			runtime.HandleError(fmt.Errorf("timeout or abort while handling: method: %v, URI: %q, auditID: %q", req.Method, req.RequestURI, auditID))
+			runtime.HandleError(fmt.Errorf("timeout or abort while handling, method: %v, URI: %q, auditID: %q", req.Method, req.RequestURI, auditID))
 			return
 		}
 		http.Error(w, "This request caused apiserver to panic. Look in the logs for details.", http.StatusInternalServerError)
@@ -74,4 +79,11 @@ func withPanicRecovery(handler http.Handler, crashHandler func(http.ResponseWrit
 		// Dispatch to the internal handler
 		handler.ServeHTTP(w, req)
 	})
+}
+
+func currentStack() string {
+	// Only log stacks for errors
+	stack := make([]byte, 50*1024)
+	stack = stack[:standruntime.Stack(stack, false)]
+	return "\n" + string(stack)
 }
